@@ -19,22 +19,34 @@ function totalOpenIssueCount (repos) {
   return _.sum(repos.map(repo => repo.open_issues));
 }
 
+function issueView (issue) {
+  return (
+    div('.issue', [
+      JSON.stringify(issue)
+    ])
+  )
+}
+
 function repoView (repo) {
   return (
     div('.repo', [
       div('.name', linkify(repo.name, '/issues')),
-      div('.open-issues', `${repo.open_issues} open issues`)
+      div('.open-issues', `${repo.open_issues} open issue(s)`)
     ])
   );
 }
 
-function view (repos) {
+function view (repos, issues) {
   return (
     div('.dashboard', [
       div('.splash', [
         div('.total', `${totalOpenIssueCount(repos)} issues open total`)
       ]),
-      div('.repos', hideZeroIssueProjects(sortByIssues(repos)).map(repoView))
+
+      div('.content', [
+        div('.repos', hideZeroIssueProjects(sortByIssues(repos)).map(repoView)),
+        div('.issues', issues.map(issueView))
+      ])
     ])
   );
 }
@@ -64,8 +76,14 @@ export default function App ({DOM, HTTP}) {
     .scan((page, _) => page + 1)
     .map(page => repos('Widdershin', page));
 
+  const issues$ = Observable.just(['wow']);
+
   return {
-    DOM: repos$.map(view),
+    DOM: Observable.combineLatest(
+      repos$,
+      issues$,
+      view
+    ),
     HTTP: request$
   };
 }
