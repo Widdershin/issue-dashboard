@@ -1,33 +1,71 @@
-import {div, button} from '@cycle/dom';
+import {div, button, a} from '@cycle/dom';
 
 import {Observable} from 'rx';
+import _ from 'lodash';
 
-function view (count) {
+function linkify (repoName, page = '/') {
+  return a({href: `http://github.com/Widdershin/${repoName}${page}`}, repoName);
+}
+
+function sortByIssues (repos) {
+  return _.sortBy(repos, repo => -repo.open_issues);
+}
+
+function hideZeroIssueProjects (repos) {
+  return repos.filter(repo => repo.open_issues > 0);
+}
+
+function totalOpenIssueCount (repos) {
+  return _.sum(repos.map(repo => repo.open_issues));
+}
+
+function repoView (repo) {
   return (
-    div('.counter', [
-      div('.count', `Count: ${count}`),
-      button('.subtract', 'Subtract'),
-      button('.add', 'Add')
+    div('.repo', [
+      div('.name', linkify(repo.name, '/issues')),
+      div('.open-issues', `${repo.open_issues} open issues`)
     ])
   );
 }
 
-export default function App ({DOM}) {
-  const add$ = DOM
-    .select('.add')
-    .events('click')
-    .map(ev => +1);
+function view (repos) {
+  return (
+    div('.dashboard', [
+      div('.splash', [
+        div('.total', `${totalOpenIssueCount(repos)} issues open total`)
+      ]),
+      div('.repos', hideZeroIssueProjects(sortByIssues(repos)).map(repoView))
+    ])
+  );
+}
 
-  const subtract$ = DOM
-    .select('.subtract')
-    .events('click')
-    .map(ev => -1);
+const githubApi = 'https://api.github.com';
 
-  const count$ = add$.merge(subtract$)
-    .startWith(0)
-    .scan((total, change) => total + change);
+function user (username) {
+  return `${githubApi}/users/${username}`;
+}
+
+function repos (username, page = 1) {
+  return `${user(username)}/repos?type=owner&per_page=100&page=${page}`;
+}
+
+export default function App ({DOM, HTTP}) {
+  const response$ = HTTP
+    .mergeAll()
+    .map(response => response.body);
+
+  const repos$ = response$
+    .startWith([])
+    .scan((currentRepos, newRepos) => _.uniqBy(currentRepos.concat(newRepos), 'name'));
+
+  const request$ = response$
+    .takeWhile(response => response.length > 0)
+    .startWith(1)
+    .scan((page, _) => page + 1)
+    .map(page => repos('Widdershin', page));
 
   return {
-    DOM: count$.map(view)
+    DOM: repos$.map(view),
+    HTTP: request$
   };
 }
