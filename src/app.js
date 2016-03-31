@@ -3,6 +3,8 @@ import {div, button, a} from '@cycle/dom';
 import {Observable} from 'rx';
 import _ from 'lodash';
 
+const CLIENT_ID = '031ef56073f64d1a7126';
+
 function linkify (repoName, page = '/') {
   return a({href: `http://github.com/Widdershin/${repoName}${page}`}, repoName);
 }
@@ -57,26 +59,37 @@ function user (username) {
   return `${githubApi}/users/${username}`;
 }
 
-function repos (username, page = 1) {
-  return `${user(username)}/repos?type=owner&per_page=100&page=${page}`;
+function repos (username, page) {
+  let pageQueryParam = '';
+
+  if (page) {
+    pageQueryParam = `&page=${page}`;
+  }
+
+  return `${user(username)}/repos?type=owner&per_page=100${pageQueryParam}`;
 }
 
-export default function App ({DOM, HTTP}) {
-  const response$ = HTTP
+function Dashboard ({DOM, HTTP}) {
+  const repoResponse$ = HTTP
+    .filter(response => _.includes(response.request.url, repos('Widdershin')))
     .mergeAll()
     .map(response => response.body);
 
-  const repos$ = response$
+  const repos$ = repoResponse$
     .startWith([])
     .scan((currentRepos, newRepos) => _.uniqBy(currentRepos.concat(newRepos), 'name'));
 
-  const request$ = response$
+  const repoRequest$ = repoResponse$
     .takeWhile(response => response.length > 0)
     .startWith(1)
     .scan((page, _) => page + 1)
     .map(page => repos('Widdershin', page));
 
   const issues$ = Observable.just(['wow']);
+
+  const request$ = Observable.merge(
+    repoRequest$
+  );
 
   return {
     DOM: Observable.combineLatest(
@@ -85,5 +98,49 @@ export default function App ({DOM, HTTP}) {
       view
     ),
     HTTP: request$
+  };
+}
+
+function loginView (authCode, githubAuthCode) {
+  if (!authCode && !githubAuthCode) {
+    return (
+      button('.sign-in', 'Sign into Github!')
+    );
+  }
+
+  if (authCode && !githubAuthCode) {
+    return (
+      div('Signing in...')
+    );
+  }
+
+  return (
+    div(`Signed in: ${githubAuthCode}`)
+  );
+}
+
+function authWithGateKeeper (authCode) {
+  return `https://widdershin-gatekeeper.herokuapp.com/authenticate/${authCode}`;
+}
+
+export default function App ({DOM, HTTP, Params}) {
+  const redirectToGithub$ = DOM
+    .select('.sign-in')
+    .events('click')
+    .map(() => `https://github.com/login/oauth/authorize?client_id=${CLIENT_ID}&redirect_uri=http://localhost:8000`);
+
+  const authCode$ = Params
+    .pluck('code')
+    .take(1);
+
+  const githubAuthCode$ = HTTP
+    .mergeAll()
+    .map(response => response.body)
+    .pluck('token');
+
+  return {
+    DOM: Observable.combineLatest(authCode$, githubAuthCode$, loginView),
+    Redirect: redirectToGithub$,
+    HTTP: authCode$.map(authWithGateKeeper)
   };
 }
