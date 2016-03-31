@@ -59,17 +59,33 @@ function user (username) {
   return `${githubApi}/users/${username}`;
 }
 
-function repos (username, page) {
+function repos (username, page, code) {
   let pageQueryParam = '';
+  let codeQueryParam = '';
 
   if (page) {
     pageQueryParam = `&page=${page}`;
   }
 
-  return `${user(username)}/repos?type=owner&per_page=100${pageQueryParam}`;
+  if (code) {
+    codeQueryParam = `&access_token=${code}`;
+  }
+
+  return `${user(username)}/repos?type=owner&per_page=100${pageQueryParam}${codeQueryParam}`;
 }
 
-function Dashboard ({DOM, HTTP}) {
+function makeRepoRequest (code, repoResponse$) {
+  return repoResponse$
+    .takeWhile(response => response.length > 0)
+    .startWith(1)
+    .scan((page, _) => page + 1)
+    .map(page => repos('Widdershin', page, code));
+}
+
+function Dashboard ({DOM, HTTP, props$}) {
+  const githubApiCode$ = props$.filter(code => !!code)
+    .do(console.log.bind(console, 'WOWZAAA'));
+
   const repoResponse$ = HTTP
     .filter(response => _.includes(response.request.url, repos('Widdershin')))
     .mergeAll()
@@ -79,16 +95,10 @@ function Dashboard ({DOM, HTTP}) {
     .startWith([])
     .scan((currentRepos, newRepos) => _.uniqBy(currentRepos.concat(newRepos), 'name'));
 
-  const repoRequest$ = repoResponse$
-    .takeWhile(response => response.length > 0)
-    .startWith(1)
-    .scan((page, _) => page + 1)
-    .map(page => repos('Widdershin', page));
-
   const issues$ = Observable.just(['wow']);
 
   const request$ = Observable.merge(
-    repoRequest$
+    githubApiCode$.flatMap((code) => makeRepoRequest(code, repoResponse$))
   );
 
   return {
@@ -101,7 +111,7 @@ function Dashboard ({DOM, HTTP}) {
   };
 }
 
-function loginView (authCode, githubAuthCode) {
+function loginView (dashboardDOM, authCode, githubAuthCode) {
   if (!authCode && !githubAuthCode) {
     return (
       button('.sign-in', 'Sign into Github!')
@@ -115,7 +125,10 @@ function loginView (authCode, githubAuthCode) {
   }
 
   return (
-    div(`Signed in: ${githubAuthCode}`)
+    div([
+      'Signed in.',
+      dashboardDOM
+    ])
   );
 }
 
@@ -138,8 +151,10 @@ export default function App ({DOM, HTTP, Params}) {
     .map(response => response.body)
     .pluck('token');
 
+  const dashboard = Dashboard({DOM, HTTP, props$: githubAuthCode$})
+
   return {
-    DOM: Observable.combineLatest(authCode$, githubAuthCode$, loginView),
+    DOM: Observable.combineLatest(dashboard.DOM, authCode$, githubAuthCode$.startWith(null), loginView),
     Redirect: redirectToGithub$,
     HTTP: authCode$.map(authWithGateKeeper)
   };
