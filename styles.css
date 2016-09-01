@@ -7,6 +7,12 @@
   flex-direction: column;
 }
 
+
+.issue {
+  padding: 5px;
+  margin: 5px;
+}
+
 .repos:before {
   content: 'Repos'
 }
@@ -23,3 +29,4 @@
   background: hotpink;
   border-radius: 2px;
 }
+

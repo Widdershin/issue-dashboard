@@ -24,9 +24,11 @@ function totalOpenIssueCount (repos) {
 function issueView (issue) {
   return (
     div('.issue', [
-      JSON.stringify(issue)
+      JSON.stringify(issue),
+      div(`#${issue.number}`),
+      div(issue.title)
     ])
-  )
+  );
 }
 
 function repoView (repo) {
@@ -95,10 +97,27 @@ function Dashboard ({DOM, HTTP, props$}) {
     .startWith([])
     .scan((currentRepos, newRepos) => _.uniqBy(currentRepos.concat(newRepos), 'name'));
 
-  const issues$ = Observable.just(['wow']);
+  const issueResponses$ = HTTP
+    .filter(response => _.includes(response.request.url, 'issues'))
+    .mergeAll()
+    .map(response => response.body);
+
+  const issues$ = issueResponses$
+    .startWith([])
+    .scan((currentIssues, newIssues) => currentIssues.concat(newIssues));
+
+  const issueRequests$ = repos$
+    .flatMap(repos => repos.map(repo => repo.issues_url.replace('{/number}', '')));
+
+  const issueRequestsWithAccess$ = Observable.combineLatest(
+    issueRequests$,
+    githubApiCode$,
+    (request, code) => `${request}?access_token=${code}`
+  );
 
   const request$ = Observable.merge(
-    githubApiCode$.flatMap((code) => makeRepoRequest(code, repoResponse$))
+    githubApiCode$.flatMap((code) => makeRepoRequest(code, repoResponse$)),
+    issueRequestsWithAccess$
   );
 
   return {
@@ -112,6 +131,7 @@ function Dashboard ({DOM, HTTP, props$}) {
 }
 
 function loginView (dashboardDOM, authCode, githubAuthCode) {
+  console.log(authCode, githubAuthCode)
   if (!authCode && !githubAuthCode) {
     return (
       button('.sign-in', 'Sign into Github!')
@@ -147,15 +167,24 @@ export default function App ({DOM, HTTP, Params}) {
     .take(1);
 
   const githubAuthCode$ = HTTP
+    .filter((response$) => _.includes(response$.request.url, 'gatekeeper'))
     .mergeAll()
     .map(response => response.body)
-    .pluck('token');
+    .pluck('token')
+    .take(1);
 
-  const dashboard = Dashboard({DOM, HTTP, props$: githubAuthCode$})
+  const dashboard = Dashboard({DOM, HTTP, props$: githubAuthCode$});
+
+  const request$ = authCode$
+    .filter(code => !!code)
+    .map(authWithGateKeeper);
 
   return {
     DOM: Observable.combineLatest(dashboard.DOM, authCode$, githubAuthCode$.startWith(null), loginView),
     Redirect: redirectToGithub$,
-    HTTP: authCode$.map(authWithGateKeeper)
+    HTTP: Observable.merge(
+      request$,
+      dashboard.HTTP
+    )
   };
 }
